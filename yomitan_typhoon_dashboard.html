@@ -247,7 +247,9 @@ let typhoonLayerGroup = null;
 function ensureTyphoonMap(){
   if(typeof L === "undefined") return false;
   if(!typhoonLeafletMap){
-    typhoonLeafletMap = L.map('typhoonMap', {scrollWheelZoom:false}).setView([26.5, 127.9], 6);
+    // zoomSnap/zoomDeltaを2にして、常に偶数ズームレベルだけを使うようにする
+    // （気象庁の雨雲レーダータイルは偶数ズームレベルでしか配信されないため）
+    typhoonLeafletMap = L.map('typhoonMap', {scrollWheelZoom:false, zoomSnap:2, zoomDelta:2}).setView([26.5, 127.9], 6);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 10
