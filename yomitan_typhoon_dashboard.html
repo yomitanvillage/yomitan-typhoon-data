@@ -22,6 +22,18 @@
   #typhoonTimeline td.num{
     width:22px; text-align:center; font-weight:bold; color:var(--text);
   }
+  .tab-row{ display:flex; flex-wrap:wrap; gap:6px; }
+  .tab-btn{
+    background:var(--card2); color:var(--sub); border:1px solid var(--border);
+    border-radius:8px 8px 0 0; padding:6px 12px; font-size:12px; cursor:pointer;
+  }
+  .tab-btn.active{ background:var(--accent); color:#111; border-color:var(--accent); font-weight:bold; }
+  .interval-row{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px; color:var(--sub); }
+  .interval-btn{
+    background:var(--card2); color:var(--sub); border:1px solid var(--border);
+    border-radius:999px; padding:4px 12px; font-size:12px; cursor:pointer;
+  }
+  .interval-btn.active{ background:var(--accent2); color:#111; border-color:var(--accent2); font-weight:bold; }
   :root{
     --bg:#0b1220; --card:#121b2e; --card2:#0e1626; --border:#233150;
     --accent:#ff6b4a; --accent2:#4ad0ff; --text:#e7edf7; --sub:#9fb0cc;
@@ -113,10 +125,12 @@
   <!-- 台風情報 -->
   <div class="card" style="grid-column:1/-1;">
     <h2><span class="icon">🌀</span> 台風情報（気象庁）<span class="status-badge" id="typhoonBadge">取得中</span></h2>
+    <div id="typhoonTabs" class="tab-row"></div>
     <div class="updated" id="typhoonUpdated"></div>
     <div id="typhoonContent" class="loading">読み込み中...</div>
     <div id="typhoonMap"></div>
     <div class="map-legend" id="typhoonMapLegend"></div>
+    <div id="intervalControls" class="interval-row"></div>
     <div id="typhoonTimeline"></div>
     <a class="src-link" href="https://www.jma.go.jp/bosai/typhoon/" target="_blank" rel="noopener">気象庁「台風情報」を別タブで開く ↗</a>
   </div>
@@ -176,6 +190,12 @@ const WARNING_NAMES = {
 const YOMITAN_AREA_CODE = "4732400"; // 読谷村 (class20)
 const OKINAWA_HONTO_CODE = "471000"; // 沖縄本島地方 (office)
 const TARGET_TYPHOON_SUFFIX = "13"; // 台風13号を優先表示（末尾2桁）
+const INTERVAL_OPTIONS = [0, 6, 12, 24, 48]; // 予報円の最小表示間隔（時間）。0=すべて表示
+
+let typhoonList = [];       // targetTc.jsonの一覧
+let selectedTcId = null;    // 現在選択中のtropicalCyclone ID
+let selectedTyphoonPoints = []; // 選択中の台風の実況＋予報（全件、間引き前）
+let selectedIntervalHours = 12; // 予報円の最小間隔（時間）
 
 function fmtDate(iso){
   if(!iso) return "";
@@ -272,9 +292,15 @@ function drawTyphoonTrack(points){
     if(p.probabilityCircleRadius){
       L.circle([lat, lon], {radius:p.probabilityCircleRadius.km*1000, color:"#4ad0ff", weight:1, fillOpacity:0.05}).addTo(typhoonLayerGroup);
     }
+    // 強風域（黄）：外側の大きい円。暴風域より先に描いて、暴風域（赤）が上に重なるようにする
+    if(p.galeWarning && p.galeWarning.length){
+      const maxKm = Math.max.apply(null, p.galeWarning.map(w => w.range.km));
+      L.circle([lat, lon], {radius:maxKm*1000, color:"#ffcc4d", weight:1.5, fillColor:"#ffcc4d", fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
+    }
+    // 暴風域／暴風警戒域（赤）：内側の円
     if(p.stormWarning && p.stormWarning.length){
       const maxKm = Math.max.apply(null, p.stormWarning.map(w => w.range.km));
-      L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1, fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
+      L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1.5, fillColor:"#ff5a5a", fillOpacity:0.12, dashArray:"4"}).addTo(typhoonLayerGroup);
     }
 
     timelineRows += "<tr><td class='num'>" + i + "</td>" +
@@ -292,32 +318,95 @@ function drawTyphoonTrack(points){
     "<span><span class='dot' style='background:#ff5a5a'></span>台風(TY)</span>" +
     "<span><span class='dot' style='background:#ff9f4a'></span>強い熱帯低気圧(STS)</span>" +
     "<span><span class='dot' style='background:#ffcc4d'></span>熱帯低気圧(TS)</span>" +
-    "<span>数字=時系列順　破線円=予報円/暴風域　📍読谷村</span>";
+    "<span style='color:#ff5a5a'>― 暴風域/暴風警戒域</span>" +
+    "<span style='color:#ffcc4d'>― 強風域</span>" +
+    "<span style='color:#4ad0ff'>― 予報円</span>" +
+    "<span>数字=時系列順　📍読谷村</span>";
 
   document.getElementById("typhoonTimeline").innerHTML =
     "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>階級</td><td class='label'>気圧</td></tr></thead><tbody>" +
     timelineRows + "</tbody></table>";
 }
 
-/* ---------------- 台風情報 ---------------- */
-async function loadTyphoon(){
+/* ---------------- 台風情報（複数台風タブ＋間隔切替） ---------------- */
+function typhoonTabLabel(t){
+  const num = t.typhoonNumber || "";
+  return num.length > 2 ? "台風" + (num.slice(-2) * 1) + "号" : "熱帯低気圧" + num;
+}
+
+function renderTyphoonTabs(){
+  const tabsEl = document.getElementById("typhoonTabs");
+  if(typhoonList.length <= 1){
+    tabsEl.innerHTML = "";
+    return;
+  }
+  tabsEl.innerHTML = typhoonList.map(t => {
+    const active = t.tropicalCyclone === selectedTcId ? " active" : "";
+    return "<button class='tab-btn" + active + "' data-tc='" + t.tropicalCyclone + "'>" + typhoonTabLabel(t) + "</button>";
+  }).join("");
+  Array.from(tabsEl.querySelectorAll(".tab-btn")).forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectedTcId = btn.getAttribute("data-tc");
+      renderTyphoonTabs();
+      loadTyphoonDetail();
+    });
+  });
+}
+
+function renderIntervalControls(){
+  const el = document.getElementById("intervalControls");
+  if(!selectedTyphoonPoints.length){
+    el.innerHTML = "";
+    return;
+  }
+  let html = "<span>予報円の間隔：</span>";
+  html += INTERVAL_OPTIONS.map(h => {
+    const active = h === selectedIntervalHours ? " active" : "";
+    const label = h === 0 ? "すべて" : h + "時間ごと";
+    return "<button class='interval-btn" + active + "' data-h='" + h + "'>" + label + "</button>";
+  }).join("");
+  el.innerHTML = html;
+  Array.from(el.querySelectorAll(".interval-btn")).forEach(btn => {
+    btn.addEventListener("click", () => {
+      selectedIntervalHours = parseInt(btn.getAttribute("data-h"), 10);
+      renderIntervalControls();
+      drawTyphoonTrack(filterPointsByInterval(selectedTyphoonPoints, selectedIntervalHours));
+    });
+  });
+}
+
+function filterPointsByInterval(points, minHours){
+  const ordered = points.slice().sort((a, b) => {
+    if(!a.isForecast && b.isForecast) return -1;
+    if(a.isForecast && !b.isForecast) return 1;
+    const ta = a.validtime ? new Date(a.validtime.JST).getTime() : 0;
+    const tb = b.validtime ? new Date(b.validtime.JST).getTime() : 0;
+    return ta - tb;
+  });
+  if(!minHours || minHours <= 0) return ordered;
+
+  const baseTime = ordered.length && ordered[0].validtime ? new Date(ordered[0].validtime.JST).getTime() : null;
+  const kept = [];
+  let lastHours = -Infinity;
+  ordered.forEach(p => {
+    let hours;
+    if(typeof p.advancedHours === "number") hours = p.advancedHours;
+    else if(baseTime !== null && p.validtime) hours = (new Date(p.validtime.JST).getTime() - baseTime) / 3600000;
+    else hours = 0;
+    if(kept.length === 0 || hours - lastHours >= minHours - 0.01){
+      kept.push(p);
+      lastHours = hours;
+    }
+  });
+  return kept;
+}
+
+async function loadTyphoonDetail(){
   const content = document.getElementById("typhoonContent");
   const badge = document.getElementById("typhoonBadge");
   const updated = document.getElementById("typhoonUpdated");
   try{
-    const list = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/targetTc.json");
-    if(!Array.isArray(list) || list.length===0){
-      content.innerHTML = '<div class="empty-msg">現在、気象庁が実況・予報を発表している台風はありません。</div>';
-      setBadge(badge, "ok", "発表なし");
-      updated.textContent = "";
-      drawTyphoonTrack([]);
-      return;
-    }
-    // 台風13号を優先。無ければ一覧のうち最新のものを表示
-    let target = list.find(t => (t.typhoonNumber||"").slice(-2) === TARGET_TYPHOON_SUFFIX);
-    if(!target) target = list[0];
-
-    const spec = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/" + target.tropicalCyclone + "/specifications.json");
+    const spec = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/" + selectedTcId + "/specifications.json");
 
     let title = spec.find(s => s.part === "title");
     let nowPart = spec.find(s => s.part && s.part.jp && s.part.jp.indexOf("実況") !== -1);
@@ -362,6 +451,10 @@ async function loadTyphoon(){
         const parts = p.stormWarning.map(w => (w.area.jp||w.area) + " " + w.range.km + "km");
         rows.push([p.part.jp.indexOf("実況")!==-1 ? "暴風域" : "暴風警戒域", parts.join(" / ")]);
       }
+      if(p.galeWarning){
+        const parts = p.galeWarning.map(w => (w.area.jp||w.area) + " " + w.range.km + "km");
+        rows.push(["強風域", parts.join(" / ")]);
+      }
       if(p.probabilityCircleRadius){
         rows.push(["予報円半径", p.probabilityCircleRadius.km + "km"]);
       }
@@ -380,9 +473,47 @@ async function loadTyphoon(){
     content.innerHTML = html;
 
     const points = [];
-    if(nowPart && nowPart.position) points.push(Object.assign({isForecast:false}, nowPart));
+    if(nowPart && nowPart.position) points.push(Object.assign({isForecast:false, advancedHours:0}, nowPart));
     forecasts.forEach(f => { if(f.position) points.push(Object.assign({isForecast:true}, f)); });
-    drawTyphoonTrack(points);
+    selectedTyphoonPoints = points;
+    renderIntervalControls();
+    drawTyphoonTrack(filterPointsByInterval(points, selectedIntervalHours));
+  }catch(e){
+    content.innerHTML = '<div class="errbox">台風情報の取得に失敗しました：' + (e && e.message ? e.message : e) + '<br>ブラウザのセキュリティ制限、または一時的な通信エラーの可能性があります。下のリンクから気象庁の公式ページをご確認ください。</div>';
+    setBadge(badge, "err", "取得失敗");
+  }
+}
+
+async function loadTyphoon(){
+  const content = document.getElementById("typhoonContent");
+  const badge = document.getElementById("typhoonBadge");
+  const updated = document.getElementById("typhoonUpdated");
+  try{
+    const list = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/targetTc.json");
+    if(!Array.isArray(list) || list.length===0){
+      typhoonList = [];
+      selectedTcId = null;
+      selectedTyphoonPoints = [];
+      document.getElementById("typhoonTabs").innerHTML = "";
+      document.getElementById("intervalControls").innerHTML = "";
+      content.innerHTML = '<div class="empty-msg">現在、気象庁が実況・予報を発表している台風はありません。</div>';
+      setBadge(badge, "ok", "発表なし");
+      updated.textContent = "";
+      drawTyphoonTrack([]);
+      return;
+    }
+    typhoonList = list;
+
+    // 選択継続：現在選んでいる台風がまだ一覧にあればそれを維持。無ければ台風13号を優先、無ければ先頭を選択
+    const stillExists = selectedTcId && list.some(t => t.tropicalCyclone === selectedTcId);
+    if(!stillExists){
+      let target = list.find(t => (t.typhoonNumber||"").slice(-2) === TARGET_TYPHOON_SUFFIX);
+      if(!target) target = list[0];
+      selectedTcId = target.tropicalCyclone;
+    }
+
+    renderTyphoonTabs();
+    await loadTyphoonDetail();
   }catch(e){
     content.innerHTML = '<div class="errbox">台風情報の取得に失敗しました：' + (e && e.message ? e.message : e) + '<br>ブラウザのセキュリティ制限、または一時的な通信エラーの可能性があります。下のリンクから気象庁の公式ページをご確認ください。</div>';
     setBadge(badge, "err", "取得失敗");
