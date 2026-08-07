@@ -2,8 +2,8 @@ name: Update Yomitan Outage Data
 
 on:
   schedule:
-    # 15分ごと（GitHub側の負荷状況により数分ずれることがあります）
-    - cron: "*/15 * * * *"
+    # 5分ごと（GitHub側の負荷状況により数分ずれることがあります）
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 permissions:
