@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>読谷村 台風情報ダッシュボード</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  #typhoonMap{ height:420px; border-radius:10px; border:1px solid var(--border); margin-top:4px; background:#0e1626; }
+  .leaflet-popup-content{ font-size:12px; }
+  .map-legend{ font-size:11px; color:var(--sub); display:flex; flex-wrap:wrap; gap:12px; margin-top:4px; }
+  .map-legend span{ display:inline-flex; align-items:center; gap:4px; }
+  .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
+  :root{
+    --bg:#0b1220; --card:#121b2e; --card2:#0e1626; --border:#233150;
+    --accent:#ff6b4a; --accent2:#4ad0ff; --text:#e7edf7; --sub:#9fb0cc;
+    --ok:#3ddc84; --warn:#ffcc4d; --danger:#ff5a5a;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    background:linear-gradient(180deg,#0b1220,#0a0f1c 60%); color:var(--text);
+    padding:20px;
+  }
+  header{
+    max-width:1200px; margin:0 auto 20px; display:flex; flex-wrap:wrap;
+    justify-content:space-between; align-items:center; gap:12px;
+  }
+  header h1{ font-size:22px; margin:0; }
+  header h1 span{ color:var(--accent); }
+  .meta{ font-size:12px; color:var(--sub); }
+  .refresh-btn{
+    background:var(--accent); color:#111; border:none; padding:8px 14px;
+    border-radius:8px; font-size:13px; font-weight:bold; cursor:pointer;
+  }
+  .refresh-btn:hover{ opacity:.85; }
+  .grid{
+    max-width:1200px; margin:0 auto; display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px;
+  }
+  .card{
+    background:var(--card); border:1px solid var(--border); border-radius:14px;
+    padding:16px 18px; display:flex; flex-direction:column; gap:10px;
+  }
+  .card h2{
+    margin:0; font-size:15px; display:flex; align-items:center; gap:8px;
+  }
+  .card h2 .icon{ font-size:18px; }
+  .card .updated{ font-size:11px; color:var(--sub); margin-top:-6px; }
+  .status-badge{
+    display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
+    background:#1c2740; color:var(--sub); margin-left:auto;
+  }
+  .status-badge.ok{ background:rgba(61,220,132,.15); color:var(--ok); }
+  .status-badge.warn{ background:rgba(255,204,77,.15); color:var(--warn); }
+  .status-badge.err{ background:rgba(255,90,90,.15); color:var(--danger); }
+  table{ width:100%; border-collapse:collapse; font-size:13px; }
+  td, th{ padding:5px 6px; border-bottom:1px solid var(--border); text-align:left; vertical-align:top;}
+  td.label{ color:var(--sub); width:38%; white-space:nowrap; }
+  .tag{
+    display:inline-block; padding:3px 9px; border-radius:6px; font-size:12px;
+    margin:2px 4px 2px 0; background:rgba(255,90,90,.15); color:#ffb0a3; border:1px solid rgba(255,90,90,.3);
+  }
+  .tag.advisory{ background:rgba(255,204,77,.13); color:#ffe08a; border-color:rgba(255,204,77,.3); }
+  .empty-msg{ color:var(--sub); font-size:13px; }
+  iframe{
+    width:100%; height:480px; border:1px solid var(--border); border-radius:10px;
+    background:#fff;
+  }
+  a.src-link{ color:var(--accent2); font-size:12px; text-decoration:none; }
+  a.src-link:hover{ text-decoration:underline; }
+  .footer-links{
+    max-width:1200px; margin:24px auto 0; background:var(--card2);
+    border:1px solid var(--border); border-radius:14px; padding:16px 18px; font-size:13px;
+  }
+  .footer-links h3{ margin:0 0 8px; font-size:14px; color:var(--sub); font-weight:normal; }
+  .footer-links ul{ margin:0; padding-left:18px; }
+  .footer-links li{ margin:4px 0; }
+  .footer-links a{ color:var(--accent2); }
+  .loading{ color:var(--sub); font-size:13px; }
+  .errbox{
+    font-size:12px; color:var(--danger); background:rgba(255,90,90,.08);
+    border:1px solid rgba(255,90,90,.25); border-radius:8px; padding:8px 10px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>🌀 <span>読谷村</span> 台風情報ダッシュボード</h1>
+    <div class="meta">対象エリア：沖縄県中頭郡読谷村（本島中部）／ 自動更新：5分ごと</div>
+  </div>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <span class="meta" id="lastGlobalUpdate">読み込み中...</span>
+    <button class="refresh-btn" onclick="refreshAll()">今すぐ更新</button>
+  </div>
+</header>
+
+<div class="grid">
+
+  <!-- 台風情報 -->
+  <div class="card" style="grid-column:1/-1;">
+    <h2><span class="icon">🌀</span> 台風情報（気象庁）<span class="status-badge" id="typhoonBadge">取得中</span></h2>
+    <div class="updated" id="typhoonUpdated"></div>
+    <div id="typhoonContent" class="loading">読み込み中...</div>
+    <div id="typhoonMap"></div>
+    <div class="map-legend" id="typhoonMapLegend"></div>
+    <a class="src-link" href="https://www.jma.go.jp/bosai/typhoon/" target="_blank" rel="noopener">気象庁「台風情報」を別タブで開く ↗</a>
+  </div>
+
+  <!-- 警報注意報 -->
+  <div class="card">
+    <h2><span class="icon">⚠️</span> 読谷村の警報・注意報（気象庁）<span class="status-badge" id="warningBadge">取得中</span></h2>
+    <div class="updated" id="warningUpdated"></div>
+    <div id="warningContent" class="loading">読み込み中...</div>
+    <a class="src-link" href="https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code=4732400&lang=ja" target="_blank" rel="noopener">気象庁「警報・注意報」を別タブで開く ↗</a>
+  </div>
+
+  <!-- 停電情報 -->
+  <div class="card">
+    <h2><span class="icon">💡</span> 読谷村の停電情報（沖縄電力）<span class="status-badge" id="outageBadge">取得中</span></h2>
+    <div class="meta">沖縄電力の公式データをGitHub Actionsが15分ごとに取得し、GitHub経由でこのページに表示しています。</div>
+    <div class="updated" id="outageUpdated"></div>
+    <div id="outageContent" class="loading">読み込み中...</div>
+    <a class="src-link" href="https://www.okidenmail.jp/bosai/info/index.html" target="_blank" rel="noopener">沖縄電力「停電マップ」を別タブで開く ↗</a>
+  </div>
+
+  <!-- バス運行状況 -->
+  <div class="card">
+    <h2><span class="icon">🚌</span> バス運行状況（沖縄バス協会）</h2>
+    <div class="meta">本島地区の運行情報を公式ページからそのまま表示しています。</div>
+    <iframe src="https://www.bus-okinawa.or.jp/#i01" loading="lazy" title="沖縄県バス協会 運行状況"></iframe>
+    <a class="src-link" href="https://www.bus-okinawa.or.jp/#i01" target="_blank" rel="noopener">沖縄県バス協会「運行状況」を別タブで開く ↗</a>
+  </div>
+
+</div>
+
+<div class="footer-links">
+  <h3>情報ソース一覧</h3>
+  <ul>
+    <li><a href="https://www.okidenmail.jp/bosai/info/index.html" target="_blank" rel="noopener">沖縄電力 停電マップ</a></li>
+    <li><a href="https://www.bus-okinawa.or.jp/" target="_blank" rel="noopener">沖縄県バス協会</a></li>
+    <li><a href="https://www.jma.go.jp/bosai/typhoon/" target="_blank" rel="noopener">気象庁 台風情報</a></li>
+    <li><a href="https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code=4732400&lang=ja" target="_blank" rel="noopener">気象庁 読谷村 警報・注意報</a></li>
+  </ul>
+  <div class="meta" style="margin-top:8px;">
+    ※ 停電マップ・バス運行状況は各公式サイトを埋め込み表示しています（サイト側の設定により表示できない場合は上のリンクからご確認ください）。台風情報・警報注意報は気象庁の公開データをこのページが直接取得して表示しています。
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const WARNING_NAMES = {
+  "02":"暴風雪警報","03":"大雨警報","04":"洪水警報","05":"暴風警報","06":"大雪警報",
+  "07":"波浪警報","08":"高潮警報","09":"土砂災害警報","10":"大雨注意報","12":"大雪注意報",
+  "13":"風雪注意報","14":"雷注意報","15":"強風注意報","16":"波浪注意報","17":"融雪注意報",
+  "18":"洪水注意報","19":"高潮注意報","20":"濃霧注意報","21":"乾燥注意報","22":"なだれ注意報",
+  "23":"低温注意報","24":"霜注意報","25":"着氷注意報","26":"着雪注意報","29":"土砂災害注意報",
+  "32":"暴風雪特別警報","33":"大雨特別警報","35":"暴風特別警報","36":"大雪特別警報",
+  "37":"波浪特別警報","38":"高潮特別警報","39":"土砂災害特別警報","43":"大雨危険警報",
+  "48":"高潮危険警報","49":"土砂災害危険警報"
+};
+const YOMITAN_AREA_CODE = "4732400"; // 読谷村 (class20)
+const OKINAWA_HONTO_CODE = "471000"; // 沖縄本島地方 (office)
+const TARGET_TYPHOON_SUFFIX = "13"; // 台風13号を優先表示（末尾2桁）
+
+function fmtDate(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString("ja-JP", {timeZone:"Asia/Tokyo", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"}) + " JST";
+}
+function setBadge(el, type, text){
+  el.className = "status-badge " + type;
+  el.textContent = text;
+}
+// fetchにタイムアウトを付ける（応答が無いまま固まるのを防ぐ）
+async function fetchJson(url, timeoutMs){
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs || 15000);
+  try{
+    const res = await fetch(url, {cache:"no-store", signal:controller.signal});
+    if(!res.ok) throw new Error("HTTPエラー " + res.status);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* ---------------- 台風進路図（Leaflet） ---------------- */
+const YOMITAN_LATLNG = [26.394, 127.741];
+const CATEGORY_COLOR = {"TY":"#ff5a5a","STS":"#ff9f4a","TS":"#ffcc4d","TD":"#9fb0cc"};
+let typhoonLeafletMap = null;
+let typhoonLayerGroup = null;
+
+function ensureTyphoonMap(){
+  if(typeof L === "undefined") return false;
+  if(!typhoonLeafletMap){
+    typhoonLeafletMap = L.map('typhoonMap', {scrollWheelZoom:false}).setView([26.5, 127.9], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 10
+    }).addTo(typhoonLeafletMap);
+    typhoonLayerGroup = L.layerGroup().addTo(typhoonLeafletMap);
+    L.marker(YOMITAN_LATLNG, {title:'読谷村'}).addTo(typhoonLeafletMap).bindPopup('読谷村');
+  } else {
+    typhoonLayerGroup.clearLayers();
+  }
+  return true;
+}
+
+function drawTyphoonTrack(points){
+  if(!ensureTyphoonMap()) return;
+  document.getElementById("typhoonMap").style.display = "block";
+  if(!points.length){
+    typhoonLeafletMap.setView([26.5, 127.9], 6);
+    document.getElementById("typhoonMapLegend").innerHTML = "";
+    return;
+  }
+  const latlngs = [];
+  points.forEach(p => {
+    const lat = p.position.deg[0], lon = p.position.deg[1];
+    latlngs.push([lat, lon]);
+    const enCat = p.category && p.category.en;
+    const color = CATEGORY_COLOR[enCat] || "#4ad0ff";
+    const marker = L.circleMarker([lat, lon], {
+      radius: p.isForecast ? 5 : 7,
+      color: color, fillColor: color, fillOpacity: p.isForecast ? 0.45 : 0.9, weight:2
+    }).addTo(typhoonLayerGroup);
+    const popup =
+      "<b>" + (p.isForecast ? "予報" : "実況") + "</b>：" + fmtDate(p.validtime ? p.validtime.JST : null) + "<br>" +
+      (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "<br>" +
+      (p.pressure ? "中心気圧 " + p.pressure + " hPa" : "");
+    marker.bindPopup(popup);
+    if(p.probabilityCircleRadius){
+      L.circle([lat, lon], {radius:p.probabilityCircleRadius.km*1000, color:"#4ad0ff", weight:1, fillOpacity:0.05}).addTo(typhoonLayerGroup);
+    }
+    if(p.stormWarning && p.stormWarning.length){
+      const maxKm = Math.max.apply(null, p.stormWarning.map(w => w.range.km));
+      L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1, fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
+    }
+  });
+  L.polyline(latlngs, {color:"#e7edf7", weight:2, dashArray:"3,6"}).addTo(typhoonLayerGroup);
+  const bounds = L.latLngBounds(latlngs.concat([YOMITAN_LATLNG]));
+  typhoonLeafletMap.fitBounds(bounds.pad(0.35));
+  setTimeout(() => typhoonLeafletMap.invalidateSize(), 200);
+
+  document.getElementById("typhoonMapLegend").innerHTML =
+    "<span><span class='dot' style='background:#ff5a5a'></span>台風(TY)</span>" +
+    "<span><span class='dot' style='background:#ff9f4a'></span>強い熱帯低気圧(STS)</span>" +
+    "<span><span class='dot' style='background:#ffcc4d'></span>熱帯低気圧(TS)</span>" +
+    "<span>● 実況　○ 予報　破線円=予報円/暴風域　📍読谷村</span>";
+}
+
+/* ---------------- 台風情報 ---------------- */
+async function loadTyphoon(){
+  const content = document.getElementById("typhoonContent");
+  const badge = document.getElementById("typhoonBadge");
+  const updated = document.getElementById("typhoonUpdated");
+  try{
+    const list = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/targetTc.json");
+    if(!Array.isArray(list) || list.length===0){
+      content.innerHTML = '<div class="empty-msg">現在、気象庁が実況・予報を発表している台風はありません。</div>';
+      setBadge(badge, "ok", "発表なし");
+      updated.textContent = "";
+      drawTyphoonTrack([]);
+      return;
+    }
+    // 台風13号を優先。無ければ一覧のうち最新のものを表示
+    let target = list.find(t => (t.typhoonNumber||"").slice(-2) === TARGET_TYPHOON_SUFFIX);
+    if(!target) target = list[0];
+
+    const spec = await fetchJson("https://www.jma.go.jp/bosai/typhoon/data/" + target.tropicalCyclone + "/specifications.json");
+
+    let title = spec.find(s => s.part === "title");
+    let nowPart = spec.find(s => s.part && s.part.jp && s.part.jp.indexOf("実況") !== -1);
+    let forecasts = spec.filter(s => s.part && s.part.jp && s.part.jp.indexOf("予報") !== -1);
+
+    if(!title){
+      content.innerHTML = '<div class="empty-msg">台風情報の形式が想定と異なるため表示できませんでした。公式ページをご確認ください。</div>';
+      setBadge(badge, "warn", "解析不可");
+      return;
+    }
+    updated.textContent = "発表: " + fmtDate(title.issue ? title.issue.JST : null);
+
+    const num = (title.typhoonNumber||"").slice(-2) * 1;
+    const name = title.name ? (title.name.jp + (title.name.en ? "（"+title.name.en+"）" : "")) : "";
+    setBadge(badge, "warn", "台風" + num + "号 発表中");
+
+    let html = "";
+    html += "<div style='font-size:15px;font-weight:bold;margin-bottom:4px;'>台風" + num + "号" + (name?"（"+name+"）":"") + "</div>";
+
+    function block(p){
+      if(!p) return "";
+      const rows = [];
+      rows.push(["情報時刻", fmtDate(p.validtime ? p.validtime.JST : null) + "（" + p.part.jp + "）"]);
+      if(p.category) rows.push(["階級", p.category.jp + (p.scale && p.scale!=="-" ? "・"+p.scale : "") + (p.intensity && p.intensity!=="-" ? "・"+p.intensity+"勢力" : "")]);
+      if(p.location) rows.push(["位置", p.location]);
+      if(p.position && p.position.deg) rows.push(["緯度経度", "北緯" + Math.abs(p.position.deg[0]).toFixed(1) + "度 / 東経" + Math.abs(p.position.deg[1]).toFixed(1) + "度"]);
+      if(p.course) {
+        let sp = "";
+        if(p.speed){
+          if(p.speed["km/h"]) sp = p.speed["km/h"] + "km/h（" + p.speed.kt + "kt）";
+          else if(p.speed.note) sp = p.speed.note.jp || "";
+        }
+        rows.push(["進行方向・速度", p.course + (sp ? "　" + sp : "")]);
+      }
+      if(p.pressure) rows.push(["中心気圧", p.pressure + " hPa"]);
+      if(p.maximumWind && p.maximumWind.sustained && p.maximumWind.sustained["m/s"] !== "0"){
+        const mw = p.maximumWind.sustained, gu = p.maximumWind.gust;
+        rows.push(["最大風速" + (mw.note?"（"+mw.note+"）":""), mw["m/s"] + "m/s（" + mw.kt + "kt）"]);
+        if(gu) rows.push(["最大瞬間風速", gu["m/s"] + "m/s（" + gu.kt + "kt）"]);
+      }
+      if(p.stormWarning){
+        const parts = p.stormWarning.map(w => (w.area.jp||w.area) + " " + w.range.km + "km");
+        rows.push([p.part.jp.indexOf("実況")!==-1 ? "暴風域" : "暴風警戒域", parts.join(" / ")]);
+      }
+      if(p.probabilityCircleRadius){
+        rows.push(["予報円半径", p.probabilityCircleRadius.km + "km"]);
+      }
+      let t = "<table>";
+      for(const [k,v] of rows){ t += "<tr><td class='label'>"+k+"</td><td>"+v+"</td></tr>"; }
+      t += "</table>";
+      return t;
+    }
+
+    html += "<div style='margin-bottom:10px;'>" + block(nowPart) + "</div>";
+    if(forecasts.length){
+      html += "<details><summary style='cursor:pointer;color:var(--accent2);font-size:13px;'>今後の予報を見る（" + forecasts.length + "件）</summary>";
+      forecasts.forEach(f => { html += "<div style='margin:10px 0;border-top:1px solid var(--border);padding-top:8px;'>" + block(f) + "</div>"; });
+      html += "</details>";
+    }
+    content.innerHTML = html;
+
+    const points = [];
+    if(nowPart && nowPart.position) points.push(Object.assign({isForecast:false}, nowPart));
+    forecasts.forEach(f => { if(f.position) points.push(Object.assign({isForecast:true}, f)); });
+    drawTyphoonTrack(points);
+  }catch(e){
+    content.innerHTML = '<div class="errbox">台風情報の取得に失敗しました：' + (e && e.message ? e.message : e) + '<br>ブラウザのセキュリティ制限、または一時的な通信エラーの可能性があります。下のリンクから気象庁の公式ページをご確認ください。</div>';
+    setBadge(badge, "err", "取得失敗");
+  }
+}
+
+/* ---------------- 警報・注意報 ---------------- */
+async function loadWarning(){
+  const content = document.getElementById("warningContent");
+  const badge = document.getElementById("warningBadge");
+  const updated = document.getElementById("warningUpdated");
+  try{
+    const reports = await fetchJson("https://www.jma.go.jp/bosai/warning/data/r8/" + OKINAWA_HONTO_CODE + ".json");
+    if(!Array.isArray(reports)) throw new Error("想定外のデータ形式です");
+
+    // 発表時刻の古い順に並べ替え、発表/継続で追加、解除で除去して「現在の状態」を組み立てる
+    const sorted = reports.slice().sort((a,b) => new Date(a.reportDatetime) - new Date(b.reportDatetime));
+    let state = {}; // code -> {additions:Set}
+    let latestReport = null;
+    for(const rep of sorted){
+      const items = rep.warning && rep.warning.class20Items;
+      if(!items) continue;
+      const area = items.find(a => a.areaCode === YOMITAN_AREA_CODE);
+      if(!area || !area.kinds) continue;
+      for(const k of area.kinds){
+        if(!k.code) continue; // "発表警報・注意報はなし" 等はcodeなし
+        if(k.status === "発表" || k.status === "継続"){
+          if(!state[k.code]) state[k.code] = {additions:new Set()};
+          (k.additions||[]).forEach(a => state[k.code].additions.add(a));
+          latestReport = rep.reportDatetime;
+        }else if(k.status === "解除"){
+          delete state[k.code];
+          latestReport = rep.reportDatetime;
+        }
+      }
+    }
+    updated.textContent = latestReport ? "最終発表: " + fmtDate(latestReport) : "";
+    const codes = Object.keys(state);
+    if(codes.length === 0){
+      content.innerHTML = '<div class="empty-msg">現在、読谷村に発表中の警報・注意報はありません。</div>';
+      setBadge(badge, "ok", "発表なし");
+      return;
+    }
+    let html = "";
+    codes.forEach(code => {
+      const name = WARNING_NAMES[code] || ("コード" + code);
+      const add = Array.from(state[code].additions).join("・");
+      const cls = name.indexOf("警報") !== -1 ? "tag" : "tag advisory";
+      html += "<span class='" + cls + "'>" + name + (add ? "（"+add+"）" : "") + "</span>";
+    });
+    content.innerHTML = html;
+    const hasWarning = codes.some(c => (WARNING_NAMES[c]||"").indexOf("警報") !== -1);
+    setBadge(badge, hasWarning ? "err" : "warn", hasWarning ? "警報発表中" : "注意報発表中");
+  }catch(e){
+    content.innerHTML = '<div class="errbox">警報・注意報の取得に失敗しました：' + (e && e.message ? e.message : e) + '<br>ブラウザのセキュリティ制限、または一時的な通信エラーの可能性があります。下のリンクから気象庁の公式ページをご確認ください。</div>';
+    setBadge(badge, "err", "取得失敗");
+  }
+}
+
+/* ---------------- 停電情報（GitHub Actions経由の沖縄電力データ） ---------------- */
+const OUTAGE_JSON_URL = "https://raw.githubusercontent.com/yomitanvillage/yomitan-typhoon-data/main/data/yomitan_outage.json";
+async function loadOutage(){
+  const content = document.getElementById("outageContent");
+  const badge = document.getElementById("outageBadge");
+  const updated = document.getElementById("outageUpdated");
+  try{
+    const data = await fetchJson(OUTAGE_JSON_URL + "?t=" + Date.now());
+
+    if(data.ok === false){
+      updated.textContent = data.updatedAt ? "最終更新: " + data.updatedAt + "（JST）" : "";
+      content.innerHTML = '<div class="empty-msg">' + (data.note || ("取得エラー: " + (data.error || "不明"))) + '</div>';
+      setBadge(badge, "warn", "未取得/失敗");
+      return;
+    }
+
+    updated.textContent = "最終更新: " + data.updatedAt + "（JST）" +
+      (data.sourceDatetime ? "／データ発表: " + data.sourceTitle + " " + data.sourceDatetime : "");
+
+    const total = data.totalHouses || 0;
+    let html = "<div style='font-size:15px;font-weight:bold;margin-bottom:6px;'>読谷村 停電戸数：" + total + "戸</div>";
+    if(data.entries && data.entries.length){
+      html += "<table><thead><tr><td class='label'>停電区域</td><td class='label'>戸数</td><td class='label'>対応状況</td><td class='label'>復旧見込み</td><td class='label'>発生時刻</td></tr></thead><tbody>";
+      data.entries.forEach(e => {
+        html += "<tr><td>" + e.area + "</td><td style='text-align:right;'>" + e.houses + "戸</td>" +
+          "<td>" + e.status + "</td><td>" + e.restore + "</td><td>" + e.occurredAt + "</td></tr>";
+      });
+      html += "</tbody></table>";
+    } else {
+      html = '<div class="empty-msg">現在、読谷村で発表されている停電はありません。</div>';
+    }
+    content.innerHTML = html;
+    setBadge(badge, total > 0 ? "err" : "ok", total > 0 ? "停電発生中" : "停電なし");
+  }catch(e){
+    content.innerHTML = '<div class="errbox">停電情報の取得に失敗しました：' + (e && e.message ? e.message : e) + '<br>GitHub上のデータファイルがまだ作成されていないか、通信エラーの可能性があります。下のリンクから沖縄電力の公式ページをご確認ください。</div>';
+    setBadge(badge, "err", "取得失敗");
+  }
+}
+
+function refreshAll(){
+  document.getElementById("lastGlobalUpdate").textContent = "更新中...";
+  Promise.all([loadTyphoon(), loadWarning(), loadOutage()]).finally(() => {
+    document.getElementById("lastGlobalUpdate").textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+  });
+}
+
+window.addEventListener("error", function(ev){
+  ["typhoonContent","warningContent","outageContent"].forEach(id => {
+    const el = document.getElementById(id);
+    if(el && el.classList.contains("loading")){
+      el.innerHTML = '<div class="errbox">スクリプトエラーが発生しました：' + (ev.message||"") + '<br>下のリンクから公式ページをご確認ください。</div>';
+    }
+  });
+});
+
+refreshAll();
+setInterval(refreshAll, 5 * 60 * 1000); // 5分ごとに自動更新
+</script>
+
+</body>
+</html>
