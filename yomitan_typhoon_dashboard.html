@@ -26,6 +26,11 @@
   #typhoonTimeline tr.timeline-row:hover{ background:rgba(255,255,255,.04); }
   #typhoonTimeline tr.timeline-row.selected{ background:rgba(74,208,255,.12); }
   #typhoonTimeline tr.timeline-row.selected td.num{ color:var(--accent2); }
+  /* スマホでは「大きさ」「強さ」列（3・4番目）を非表示にする */
+  @media (max-width:600px){
+    #typhoonTimeline td:nth-child(3),
+    #typhoonTimeline td:nth-child(4){ display:none; }
+  }
   .tab-row{ display:flex; flex-wrap:wrap; gap:6px; }
   .tab-btn{
     background:var(--card2); color:var(--sub); border:1px solid var(--border);
@@ -149,8 +154,9 @@
 
   <!-- 停電情報 -->
   <div class="card">
-    <h2><span class="icon">💡</span> 読谷村の停電情報（沖縄電力）<span class="status-badge" id="outageBadge">取得中</span></h2>
-    <div class="meta">沖縄電力の公式データをGitHub Actionsが5分ごとに取得し、GitHub経由でこのページに表示しています。</div>
+    <h2><span class="icon">💡</span> 読谷村の停電情報（沖縄電力）<span class="status-badge" id="outageBadge">取得中</span>
+      <button class="interval-btn" type="button" style="margin-left:auto;" onclick="loadOutage()">更新</button>
+    </h2>
     <div class="updated" id="outageUpdated"></div>
     <div id="outageContent" class="loading">読み込み中...</div>
     <a class="src-link" href="https://www.okidenmail.jp/bosai/info/index.html" target="_blank" rel="noopener">沖縄電力「停電マップ」を別タブで開く ↗</a>
