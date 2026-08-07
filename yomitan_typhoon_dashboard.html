@@ -142,8 +142,12 @@
     <div id="typhoonTabs" class="tab-row"></div>
     <div class="updated" id="typhoonUpdated"></div>
     <div id="typhoonContent" class="loading">読み込み中...</div>
+    <label style="font-size:12px; color:var(--sub); display:flex; align-items:center; gap:6px; margin-top:4px;">
+      <input type="checkbox" id="radarToggle"> 雨雲レーダーを重ねて表示
+    </label>
     <div id="typhoonMap"></div>
     <div class="map-legend" id="typhoonMapLegend"></div>
+    <div class="meta" id="radarUpdated"></div>
     <div id="intervalControls" class="interval-row"></div>
     <div id="typhoonTimeline"></div>
     <a class="src-link" href="https://www.jma.go.jp/bosai/typhoon/" target="_blank" rel="noopener">気象庁「台風情報」を別タブで開く ↗</a>
@@ -250,10 +254,53 @@ function ensureTyphoonMap(){
     }).addTo(typhoonLeafletMap);
     typhoonLayerGroup = L.layerGroup().addTo(typhoonLeafletMap);
     L.marker(YOMITAN_LATLNG, {title:'読谷村'}).addTo(typhoonLeafletMap).bindPopup('読谷村');
+
+    const radarToggle = document.getElementById("radarToggle");
+    if(radarToggle){
+      radarToggle.addEventListener("change", () => {
+        if(radarToggle.checked) enableRadarLayer();
+        else disableRadarLayer();
+      });
+    }
   } else {
     typhoonLayerGroup.clearLayers();
   }
   return true;
+}
+
+/* ---------------- 雨雲レーダー（気象庁 降水ナウキャスト タイル） ---------------- */
+let radarLayer = null;
+
+function parseJmaTimeStr(s){
+  // "20260807142000" (YYYYMMDDHHmmss, JST) -> ISO文字列
+  if(!s || s.length < 14) return null;
+  return s.slice(0,4) + "-" + s.slice(4,6) + "-" + s.slice(6,8) + "T" + s.slice(8,10) + ":" + s.slice(10,12) + ":" + s.slice(12,14) + "+09:00";
+}
+
+async function enableRadarLayer(){
+  const updatedEl = document.getElementById("radarUpdated");
+  try{
+    const times = await fetchJson("https://www.jma.go.jp/bosai/jmatile/data/nowc/targetTimes_N1.json");
+    if(!Array.isArray(times) || !times.length) throw new Error("時刻情報が取得できませんでした");
+    const latest = times[0]; // 先頭が最新
+    const url = "https://www.jma.go.jp/bosai/jmatile/data/nowc/" + latest.basetime + "/none/" + latest.validtime + "/surf/hrpns/{z}/{x}/{y}.png";
+    if(radarLayer){ typhoonLeafletMap.removeLayer(radarLayer); }
+    radarLayer = L.tileLayer(url, {
+      zIndex: 30, maxNativeZoom: 10, opacity: 0.7,
+      attribution: "<a href='https://www.jma.go.jp/bosai/nowc/' target='_blank'>雨雲の動き（気象庁）</a>"
+    }).addTo(typhoonLeafletMap);
+    updatedEl.textContent = "雨雲レーダー時刻: " + fmtDateShort(parseJmaTimeStr(latest.validtime)) + "頃（気象庁）";
+  }catch(e){
+    updatedEl.textContent = "雨雲レーダーの取得に失敗しました：" + (e && e.message ? e.message : e);
+  }
+}
+
+function disableRadarLayer(){
+  if(radarLayer){
+    typhoonLeafletMap.removeLayer(radarLayer);
+    radarLayer = null;
+  }
+  document.getElementById("radarUpdated").textContent = "";
 }
 
 function fmtDateShort(iso){
@@ -676,6 +723,8 @@ function refreshAll(){
   document.getElementById("lastGlobalUpdate").textContent = "更新中...";
   Promise.all([loadTyphoon(), loadWarning(), loadOutage()]).finally(() => {
     document.getElementById("lastGlobalUpdate").textContent = "最終更新: " + new Date().toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+    const radarToggle = document.getElementById("radarToggle");
+    if(radarToggle && radarToggle.checked) enableRadarLayer();
   });
 }
 
