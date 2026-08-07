@@ -11,6 +11,17 @@
   .map-legend{ font-size:11px; color:var(--sub); display:flex; flex-wrap:wrap; gap:12px; margin-top:4px; }
   .map-legend span{ display:inline-flex; align-items:center; gap:4px; }
   .dot{ width:9px; height:9px; border-radius:50%; display:inline-block; }
+  .typhoon-num-badge{
+    background:var(--card); color:var(--text); border:1.5px solid var(--text);
+    border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center;
+    font-size:11px; font-weight:bold; box-shadow:0 0 3px rgba(0,0,0,.6);
+  }
+  #typhoonTimeline{ font-size:12px; margin-top:6px; }
+  #typhoonTimeline table{ width:100%; border-collapse:collapse; }
+  #typhoonTimeline td{ padding:4px 6px; border-bottom:1px solid var(--border); }
+  #typhoonTimeline td.num{
+    width:22px; text-align:center; font-weight:bold; color:var(--text);
+  }
   :root{
     --bg:#0b1220; --card:#121b2e; --card2:#0e1626; --border:#233150;
     --accent:#ff6b4a; --accent2:#4ad0ff; --text:#e7edf7; --sub:#9fb0cc;
@@ -106,6 +117,7 @@
     <div id="typhoonContent" class="loading">読み込み中...</div>
     <div id="typhoonMap"></div>
     <div class="map-legend" id="typhoonMapLegend"></div>
+    <div id="typhoonTimeline"></div>
     <a class="src-link" href="https://www.jma.go.jp/bosai/typhoon/" target="_blank" rel="noopener">気象庁「台風情報」を別タブで開く ↗</a>
   </div>
 
@@ -209,29 +221,54 @@ function ensureTyphoonMap(){
   return true;
 }
 
+function fmtDateShort(iso){
+  if(!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString("ja-JP", {timeZone:"Asia/Tokyo", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
+}
+
 function drawTyphoonTrack(points){
   if(!ensureTyphoonMap()) return;
   document.getElementById("typhoonMap").style.display = "block";
   if(!points.length){
     typhoonLeafletMap.setView([26.5, 127.9], 6);
     document.getElementById("typhoonMapLegend").innerHTML = "";
+    document.getElementById("typhoonTimeline").innerHTML = "";
     return;
   }
+  // 実況を先頭、予報を予報時刻の昇順に並べ、通し番号を振る（円が重なっても順番で識別できるようにする）
+  const ordered = points.slice().sort((a, b) => {
+    if(!a.isForecast && b.isForecast) return -1;
+    if(a.isForecast && !b.isForecast) return 1;
+    const ta = a.validtime ? new Date(a.validtime.JST).getTime() : 0;
+    const tb = b.validtime ? new Date(b.validtime.JST).getTime() : 0;
+    return ta - tb;
+  });
+
   const latlngs = [];
-  points.forEach(p => {
+  let timelineRows = "";
+  ordered.forEach((p, i) => {
     const lat = p.position.deg[0], lon = p.position.deg[1];
     latlngs.push([lat, lon]);
     const enCat = p.category && p.category.en;
     const color = CATEGORY_COLOR[enCat] || "#4ad0ff";
     const marker = L.circleMarker([lat, lon], {
-      radius: p.isForecast ? 5 : 7,
+      radius: p.isForecast ? 6 : 8,
       color: color, fillColor: color, fillOpacity: p.isForecast ? 0.45 : 0.9, weight:2
     }).addTo(typhoonLayerGroup);
+
+    // 常時表示の番号ラベル（円が重なっていても時系列の順番が一目でわかるようにする）
+    L.marker([lat, lon], {
+      icon: L.divIcon({className:"", html:"<div class='typhoon-num-badge'>" + i + "</div>", iconSize:[18,18], iconAnchor:[9,26]}),
+      interactive:false
+    }).addTo(typhoonLayerGroup);
+
     const popup =
-      "<b>" + (p.isForecast ? "予報" : "実況") + "</b>：" + fmtDate(p.validtime ? p.validtime.JST : null) + "<br>" +
+      "<b>" + i + ". " + (p.isForecast ? "予報" : "実況") + "</b>：" + fmtDate(p.validtime ? p.validtime.JST : null) + "<br>" +
       (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "<br>" +
       (p.pressure ? "中心気圧 " + p.pressure + " hPa" : "");
     marker.bindPopup(popup);
+
     if(p.probabilityCircleRadius){
       L.circle([lat, lon], {radius:p.probabilityCircleRadius.km*1000, color:"#4ad0ff", weight:1, fillOpacity:0.05}).addTo(typhoonLayerGroup);
     }
@@ -239,7 +276,13 @@ function drawTyphoonTrack(points){
       const maxKm = Math.max.apply(null, p.stormWarning.map(w => w.range.km));
       L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1, fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
     }
+
+    timelineRows += "<tr><td class='num'>" + i + "</td>" +
+      "<td>" + (p.isForecast ? "予報" : "実況") + "　" + fmtDateShort(p.validtime ? p.validtime.JST : null) + "</td>" +
+      "<td>" + (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "</td>" +
+      "<td>" + (p.pressure ? p.pressure + "hPa" : "") + "</td></tr>";
   });
+
   L.polyline(latlngs, {color:"#e7edf7", weight:2, dashArray:"3,6"}).addTo(typhoonLayerGroup);
   const bounds = L.latLngBounds(latlngs.concat([YOMITAN_LATLNG]));
   typhoonLeafletMap.fitBounds(bounds.pad(0.35));
@@ -249,7 +292,11 @@ function drawTyphoonTrack(points){
     "<span><span class='dot' style='background:#ff5a5a'></span>台風(TY)</span>" +
     "<span><span class='dot' style='background:#ff9f4a'></span>強い熱帯低気圧(STS)</span>" +
     "<span><span class='dot' style='background:#ffcc4d'></span>熱帯低気圧(TS)</span>" +
-    "<span>● 実況　○ 予報　破線円=予報円/暴風域　📍読谷村</span>";
+    "<span>数字=時系列順　破線円=予報円/暴風域　📍読谷村</span>";
+
+  document.getElementById("typhoonTimeline").innerHTML =
+    "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>階級</td><td class='label'>気圧</td></tr></thead><tbody>" +
+    timelineRows + "</tbody></table>";
 }
 
 /* ---------------- 台風情報 ---------------- */
