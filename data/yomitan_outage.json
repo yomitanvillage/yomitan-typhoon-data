@@ -1,5 +1,16 @@
 {
-  "ok": false,
-  "updatedAt": null,
-  "note": "初回のGitHub Actions実行待ちです。ワークフローを一度手動実行（workflow_dispatch）すると更新されます。"
+  "ok": true,
+  "updatedAt": "2026-08-07 13:36",
+  "sourceTitle": "台風13号に関するお知らせ",
+  "sourceDatetime": "2026.08.07（金） 13：35現在の停電状況",
+  "totalHouses": 50,
+  "entries": [
+    {
+      "area": "字座喜味",
+      "houses": "50",
+      "status": "暴風雨のため待機中",
+      "restore": "確認中",
+      "occurredAt": "2026.08.07 01:11"
+    }
+  ]
 }
