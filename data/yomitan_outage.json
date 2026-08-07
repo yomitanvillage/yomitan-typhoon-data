@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "updatedAt": null,
+  "note": "初回のGitHub Actions実行待ちです。ワークフローを一度手動実行（workflow_dispatch）すると更新されます。"
+}
