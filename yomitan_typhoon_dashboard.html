@@ -17,10 +17,10 @@
     font-size:11px; font-weight:bold; box-shadow:0 0 3px rgba(0,0,0,.6);
   }
   #typhoonTimeline{ font-size:12px; margin-top:6px; }
-  #typhoonTimeline table{ width:100%; border-collapse:collapse; }
-  #typhoonTimeline td{ padding:4px 6px; border-bottom:1px solid var(--border); }
+  #typhoonTimeline table{ width:100%; border-collapse:collapse; table-layout:fixed; }
+  #typhoonTimeline td{ padding:4px 6px; border-bottom:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; }
   #typhoonTimeline td.num{
-    width:22px; text-align:center; font-weight:bold; color:var(--text);
+    text-align:center; font-weight:bold; color:var(--text);
   }
   #typhoonTimeline tr.timeline-row{ cursor:pointer; }
   #typhoonTimeline tr.timeline-row:hover{ background:rgba(255,255,255,.04); }
@@ -251,18 +251,21 @@ function fmtDateShort(iso){
   return d.toLocaleString("ja-JP", {timeZone:"Asia/Tokyo", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
 }
 
-function maxWindText(p){
-  if(p.maximumWind && p.maximumWind.sustained && p.maximumWind.sustained["m/s"] && p.maximumWind.sustained["m/s"] !== "0"){
-    const mw = p.maximumWind.sustained;
-    return mw["m/s"] + "m/s" + (mw.note ? "（"+mw.note+"）" : "");
-  }
-  return "-";
+function sustainedWindText(p){
+  const mw = p.maximumWind && p.maximumWind.sustained;
+  if(!mw || !mw["m/s"] || mw["m/s"] === "0") return "-";
+  return mw["m/s"] + "m/s" + (mw.note && mw.note !== "中心付近" ? "（"+mw.note+"）" : "");
+}
+function gustWindText(p){
+  const gu = p.maximumWind && p.maximumWind.gust;
+  if(!gu || !gu["m/s"]) return "-";
+  return gu["m/s"] + "m/s";
 }
 
 let lastDrawnPoints = [];   // 直近にdrawTyphoonTrackへ渡した点群（行クリックでの再描画に使う）
 let currentIsolateIndex = null; // クリックで選択中の番号（nullなら全件表示）
 
-function drawTyphoonTrack(points, isolateIdx){
+function drawTyphoonTrack(points, isolateIdx, skipFit){
   if(isolateIdx === undefined) isolateIdx = null;
   if(!ensureTyphoonMap()) return;
   document.getElementById("typhoonMap").style.display = "block";
@@ -307,9 +310,9 @@ function drawTyphoonTrack(points, isolateIdx){
 
     const popup =
       "<b>" + i + ". " + (p.isForecast ? "予報" : "実況") + "</b>：" + fmtDate(p.validtime ? p.validtime.JST : null) + "<br>" +
-      (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "<br>" +
+      "大きさ " + (p.scale && p.scale!=="-" ? p.scale : "-") + "／強さ " + (p.intensity && p.intensity!=="-" ? p.intensity : "-") + "<br>" +
       (p.pressure ? "中心気圧 " + p.pressure + " hPa" : "") + "<br>" +
-      "最大風速 " + maxWindText(p);
+      "最大風速 " + sustainedWindText(p) + "／最大瞬間風速 " + gustWindText(p);
     marker.bindPopup(popup);
 
     // isolateIdx指定時は、選択した時刻の円だけを表示する
@@ -332,16 +335,15 @@ function drawTyphoonTrack(points, isolateIdx){
     const selectedCls = i === isolateIdx ? " selected" : "";
     timelineRows += "<tr class='timeline-row" + selectedCls + "' data-idx='" + i + "'><td class='num'>" + i + "</td>" +
       "<td>" + (p.isForecast ? "予報" : "実況") + "　" + fmtDateShort(p.validtime ? p.validtime.JST : null) + "</td>" +
-      "<td>" + (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "</td>" +
-      "<td>" + (p.pressure ? p.pressure + "hPa" : "") + "</td>" +
-      "<td>" + maxWindText(p) + "</td></tr>";
+      "<td>" + (p.scale && p.scale!=="-" ? p.scale : "-") + "</td>" +
+      "<td>" + (p.intensity && p.intensity!=="-" ? p.intensity : "-") + "</td>" +
+      "<td>" + (p.pressure ? p.pressure + "hPa" : "-") + "</td>" +
+      "<td>" + sustainedWindText(p) + "</td>" +
+      "<td>" + gustWindText(p) + "</td></tr>";
   });
 
   L.polyline(latlngs, {color:"#e7edf7", weight:2, dashArray:"3,6"}).addTo(typhoonLayerGroup);
-  if(isolateIdx !== null){
-    const p0 = latlngs[isolateIdx];
-    typhoonLeafletMap.fitBounds(L.latLngBounds([p0, YOMITAN_LATLNG]).pad(0.5));
-  } else {
+  if(!skipFit){
     const bounds = L.latLngBounds(latlngs.concat([YOMITAN_LATLNG]));
     typhoonLeafletMap.fitBounds(bounds.pad(0.35));
   }
@@ -358,7 +360,7 @@ function drawTyphoonTrack(points, isolateIdx){
     (isolateIdx !== null ? "<span><button class='interval-btn' id='resetIsolateBtn' type='button'>すべての円を表示に戻す</button></span>" : "");
 
   document.getElementById("typhoonTimeline").innerHTML =
-    "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>階級</td><td class='label'>気圧</td><td class='label'>最大風速</td></tr></thead><tbody>" +
+    "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>大きさ</td><td class='label'>強さ</td><td class='label'>中心気圧</td><td class='label'>中心付近の最大風速</td><td class='label'>最大瞬間風速</td></tr></thead><tbody>" +
     timelineRows + "</tbody></table>";
 
   // 行クリックでその時刻の円だけを表示（同じ行をもう一度クリックすると全件表示に戻る）
@@ -366,12 +368,12 @@ function drawTyphoonTrack(points, isolateIdx){
     tr.addEventListener("click", () => {
       const idx = parseInt(tr.getAttribute("data-idx"), 10);
       const nextIdx = (currentIsolateIndex === idx) ? null : idx;
-      drawTyphoonTrack(lastDrawnPoints, nextIdx);
+      drawTyphoonTrack(lastDrawnPoints, nextIdx, true);
     });
   });
   const resetBtn = document.getElementById("resetIsolateBtn");
   if(resetBtn){
-    resetBtn.addEventListener("click", () => drawTyphoonTrack(lastDrawnPoints, null));
+    resetBtn.addEventListener("click", () => drawTyphoonTrack(lastDrawnPoints, null, true));
   }
 }
 
