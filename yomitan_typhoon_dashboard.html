@@ -22,6 +22,10 @@
   #typhoonTimeline td.num{
     width:22px; text-align:center; font-weight:bold; color:var(--text);
   }
+  #typhoonTimeline tr.timeline-row{ cursor:pointer; }
+  #typhoonTimeline tr.timeline-row:hover{ background:rgba(255,255,255,.04); }
+  #typhoonTimeline tr.timeline-row.selected{ background:rgba(74,208,255,.12); }
+  #typhoonTimeline tr.timeline-row.selected td.num{ color:var(--accent2); }
   .tab-row{ display:flex; flex-wrap:wrap; gap:6px; }
   .tab-btn{
     background:var(--card2); color:var(--sub); border:1px solid var(--border);
@@ -247,9 +251,23 @@ function fmtDateShort(iso){
   return d.toLocaleString("ja-JP", {timeZone:"Asia/Tokyo", month:"numeric", day:"numeric", hour:"2-digit", minute:"2-digit"});
 }
 
-function drawTyphoonTrack(points){
+function maxWindText(p){
+  if(p.maximumWind && p.maximumWind.sustained && p.maximumWind.sustained["m/s"] && p.maximumWind.sustained["m/s"] !== "0"){
+    const mw = p.maximumWind.sustained;
+    return mw["m/s"] + "m/s" + (mw.note ? "（"+mw.note+"）" : "");
+  }
+  return "-";
+}
+
+let lastDrawnPoints = [];   // 直近にdrawTyphoonTrackへ渡した点群（行クリックでの再描画に使う）
+let currentIsolateIndex = null; // クリックで選択中の番号（nullなら全件表示）
+
+function drawTyphoonTrack(points, isolateIdx){
+  if(isolateIdx === undefined) isolateIdx = null;
   if(!ensureTyphoonMap()) return;
   document.getElementById("typhoonMap").style.display = "block";
+  lastDrawnPoints = points;
+  currentIsolateIndex = isolateIdx;
   if(!points.length){
     typhoonLeafletMap.setView([26.5, 127.9], 6);
     document.getElementById("typhoonMapLegend").innerHTML = "";
@@ -272,46 +290,61 @@ function drawTyphoonTrack(points){
     latlngs.push([lat, lon]);
     const enCat = p.category && p.category.en;
     const color = CATEGORY_COLOR[enCat] || "#4ad0ff";
+    const isDimmed = isolateIdx !== null && i !== isolateIdx;
     const marker = L.circleMarker([lat, lon], {
       radius: p.isForecast ? 6 : 8,
-      color: color, fillColor: color, fillOpacity: p.isForecast ? 0.45 : 0.9, weight:2
+      color: color, fillColor: color,
+      fillOpacity: isDimmed ? 0.15 : (p.isForecast ? 0.45 : 0.9),
+      opacity: isDimmed ? 0.35 : 1,
+      weight:2
     }).addTo(typhoonLayerGroup);
 
     // 常時表示の番号ラベル（円が重なっていても時系列の順番が一目でわかるようにする）
     L.marker([lat, lon], {
-      icon: L.divIcon({className:"", html:"<div class='typhoon-num-badge'>" + i + "</div>", iconSize:[18,18], iconAnchor:[9,26]}),
+      icon: L.divIcon({className:"", html:"<div class='typhoon-num-badge'" + (isDimmed ? " style='opacity:.35;'" : "") + ">" + i + "</div>", iconSize:[18,18], iconAnchor:[9,26]}),
       interactive:false
     }).addTo(typhoonLayerGroup);
 
     const popup =
       "<b>" + i + ". " + (p.isForecast ? "予報" : "実況") + "</b>：" + fmtDate(p.validtime ? p.validtime.JST : null) + "<br>" +
       (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "<br>" +
-      (p.pressure ? "中心気圧 " + p.pressure + " hPa" : "");
+      (p.pressure ? "中心気圧 " + p.pressure + " hPa" : "") + "<br>" +
+      "最大風速 " + maxWindText(p);
     marker.bindPopup(popup);
 
-    if(p.probabilityCircleRadius){
-      L.circle([lat, lon], {radius:p.probabilityCircleRadius.km*1000, color:"#4ad0ff", weight:1, fillOpacity:0.05}).addTo(typhoonLayerGroup);
-    }
-    // 強風域（黄）：外側の大きい円。暴風域より先に描いて、暴風域（赤）が上に重なるようにする
-    if(p.galeWarning && p.galeWarning.length){
-      const maxKm = Math.max.apply(null, p.galeWarning.map(w => w.range.km));
-      L.circle([lat, lon], {radius:maxKm*1000, color:"#ffcc4d", weight:1.5, fillColor:"#ffcc4d", fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
-    }
-    // 暴風域／暴風警戒域（赤）：内側の円
-    if(p.stormWarning && p.stormWarning.length){
-      const maxKm = Math.max.apply(null, p.stormWarning.map(w => w.range.km));
-      L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1.5, fillColor:"#ff5a5a", fillOpacity:0.12, dashArray:"4"}).addTo(typhoonLayerGroup);
+    // isolateIdx指定時は、選択した時刻の円だけを表示する
+    if(isolateIdx === null || isolateIdx === i){
+      if(p.probabilityCircleRadius){
+        L.circle([lat, lon], {radius:p.probabilityCircleRadius.km*1000, color:"#4ad0ff", weight:1, fillOpacity:0.05}).addTo(typhoonLayerGroup);
+      }
+      // 強風域（黄）：外側の大きい円。暴風域より先に描いて、暴風域（赤）が上に重なるようにする
+      if(p.galeWarning && p.galeWarning.length){
+        const maxKm = Math.max.apply(null, p.galeWarning.map(w => w.range.km));
+        L.circle([lat, lon], {radius:maxKm*1000, color:"#ffcc4d", weight:1.5, fillColor:"#ffcc4d", fillOpacity:0.08, dashArray:"4"}).addTo(typhoonLayerGroup);
+      }
+      // 暴風域／暴風警戒域（赤）：内側の円
+      if(p.stormWarning && p.stormWarning.length){
+        const maxKm = Math.max.apply(null, p.stormWarning.map(w => w.range.km));
+        L.circle([lat, lon], {radius:maxKm*1000, color:"#ff5a5a", weight:1.5, fillColor:"#ff5a5a", fillOpacity:0.12, dashArray:"4"}).addTo(typhoonLayerGroup);
+      }
     }
 
-    timelineRows += "<tr><td class='num'>" + i + "</td>" +
+    const selectedCls = i === isolateIdx ? " selected" : "";
+    timelineRows += "<tr class='timeline-row" + selectedCls + "' data-idx='" + i + "'><td class='num'>" + i + "</td>" +
       "<td>" + (p.isForecast ? "予報" : "実況") + "　" + fmtDateShort(p.validtime ? p.validtime.JST : null) + "</td>" +
       "<td>" + (p.category ? p.category.jp : "") + (p.intensity && p.intensity!=="-" ? "（"+p.intensity+"）" : "") + "</td>" +
-      "<td>" + (p.pressure ? p.pressure + "hPa" : "") + "</td></tr>";
+      "<td>" + (p.pressure ? p.pressure + "hPa" : "") + "</td>" +
+      "<td>" + maxWindText(p) + "</td></tr>";
   });
 
   L.polyline(latlngs, {color:"#e7edf7", weight:2, dashArray:"3,6"}).addTo(typhoonLayerGroup);
-  const bounds = L.latLngBounds(latlngs.concat([YOMITAN_LATLNG]));
-  typhoonLeafletMap.fitBounds(bounds.pad(0.35));
+  if(isolateIdx !== null){
+    const p0 = latlngs[isolateIdx];
+    typhoonLeafletMap.fitBounds(L.latLngBounds([p0, YOMITAN_LATLNG]).pad(0.5));
+  } else {
+    const bounds = L.latLngBounds(latlngs.concat([YOMITAN_LATLNG]));
+    typhoonLeafletMap.fitBounds(bounds.pad(0.35));
+  }
   setTimeout(() => typhoonLeafletMap.invalidateSize(), 200);
 
   document.getElementById("typhoonMapLegend").innerHTML =
@@ -321,11 +354,25 @@ function drawTyphoonTrack(points){
     "<span style='color:#ff5a5a'>― 暴風域/暴風警戒域</span>" +
     "<span style='color:#ffcc4d'>― 強風域</span>" +
     "<span style='color:#4ad0ff'>― 予報円</span>" +
-    "<span>数字=時系列順　📍読谷村</span>";
+    "<span>数字=時系列順　📍読谷村　下の表の行クリックでその時刻の円だけ表示</span>" +
+    (isolateIdx !== null ? "<span><button class='interval-btn' id='resetIsolateBtn' type='button'>すべての円を表示に戻す</button></span>" : "");
 
   document.getElementById("typhoonTimeline").innerHTML =
-    "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>階級</td><td class='label'>気圧</td></tr></thead><tbody>" +
+    "<table><thead><tr><td class='num'>#</td><td class='label'>時刻</td><td class='label'>階級</td><td class='label'>気圧</td><td class='label'>最大風速</td></tr></thead><tbody>" +
     timelineRows + "</tbody></table>";
+
+  // 行クリックでその時刻の円だけを表示（同じ行をもう一度クリックすると全件表示に戻る）
+  Array.from(document.querySelectorAll("#typhoonTimeline tr.timeline-row")).forEach(tr => {
+    tr.addEventListener("click", () => {
+      const idx = parseInt(tr.getAttribute("data-idx"), 10);
+      const nextIdx = (currentIsolateIndex === idx) ? null : idx;
+      drawTyphoonTrack(lastDrawnPoints, nextIdx);
+    });
+  });
+  const resetBtn = document.getElementById("resetIsolateBtn");
+  if(resetBtn){
+    resetBtn.addEventListener("click", () => drawTyphoonTrack(lastDrawnPoints, null));
+  }
 }
 
 /* ---------------- 台風情報（複数台風タブ＋間隔切替） ---------------- */
