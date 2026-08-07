@@ -26,10 +26,15 @@
   #typhoonTimeline tr.timeline-row:hover{ background:rgba(255,255,255,.04); }
   #typhoonTimeline tr.timeline-row.selected{ background:rgba(74,208,255,.12); }
   #typhoonTimeline tr.timeline-row.selected td.num{ color:var(--accent2); }
-  /* スマホでは「大きさ」「強さ」列（3・4番目）を非表示にする */
+  /* スマホでは「大きさ」「強さ」列（3・4番目）を非表示にし、情報量の多い「時刻」列を広めに取る */
   @media (max-width:600px){
     #typhoonTimeline td:nth-child(3),
     #typhoonTimeline td:nth-child(4){ display:none; }
+    #typhoonTimeline td:nth-child(1){ width:8%; }
+    #typhoonTimeline td:nth-child(2){ width:32%; white-space:normal; }
+    #typhoonTimeline td:nth-child(5),
+    #typhoonTimeline td:nth-child(6),
+    #typhoonTimeline td:nth-child(7){ width:20%; }
   }
   .tab-row{ display:flex; flex-wrap:wrap; gap:6px; }
   .tab-btn{
