@@ -1,13 +1,13 @@
 {
   "ok": true,
-  "updatedAt": "2026-08-08 13:21",
+  "updatedAt": "2026-08-08 14:12",
   "sourceTitle": "台風13号に関するお知らせ",
-  "sourceDatetime": "2026.08.08（土） 13：20現在の停電状況",
-  "totalHouses": 50,
+  "sourceDatetime": "2026.08.08（土） 14：11現在の停電状況",
+  "totalHouses": 4,
   "entries": [
     {
       "area": "字座喜味",
-      "houses": "50",
+      "houses": "4",
       "status": "工事手配中",
       "restore": "2026/08/08 夜",
       "occurredAt": "2026.08.07 01:11"
