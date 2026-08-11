@@ -1,21 +1,21 @@
 {
   "ok": true,
-  "updatedAt": "2026-08-11 21:36",
+  "updatedAt": "2026-08-11 23:02",
   "sourceTitle": "台風13号に関するお知らせ",
-  "sourceDatetime": "2026.08.11（火） 21：35現在の停電状況",
+  "sourceDatetime": "2026.08.11（火） 23：01現在の停電状況",
   "totalHouses": 130,
   "entries": [
     {
       "area": "字瀬名波",
       "houses": "70",
-      "status": "被害確認中",
+      "status": "工事手配中",
       "restore": "確認中",
       "occurredAt": "2026.08.11 19:49"
     },
     {
       "area": "字長浜",
       "houses": "60",
-      "status": "被害確認中",
+      "status": "工事手配中",
       "restore": "確認中",
       "occurredAt": "2026.08.11 19:49"
     }
