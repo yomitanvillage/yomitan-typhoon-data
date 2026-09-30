@@ -1,5 +1,8 @@
 {
-  "ok": false,
-  "updatedAt": "2026-10-01 00:19",
-  "error": "HTTP Error 503: Service Unavailable"
+  "ok": true,
+  "updatedAt": "2026-10-01 05:06",
+  "sourceTitle": "システムメンテナンスについて",
+  "sourceDatetime": "現在の停電状況",
+  "totalHouses": 0,
+  "entries": []
 }
